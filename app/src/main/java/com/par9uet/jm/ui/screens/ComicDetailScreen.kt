@@ -16,8 +16,11 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -33,14 +36,20 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.RemoveRedEye
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
@@ -49,15 +58,20 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import com.par9uet.jm.data.models.ComicChapter
 import com.par9uet.jm.store.DownloadManager
 import com.par9uet.jm.ui.components.ComicContentTag
 import com.par9uet.jm.ui.components.ComicCoverImage
@@ -228,12 +242,16 @@ fun ComicDetailScreen(
     val mainNavController = LocalMainNavController.current
     val scrollState = rememberScrollState()
     val comicDetailState by comicDetailViewModel.comicDetailState.collectAsState()
+    val readingProgress by comicDetailViewModel.readingProgressState.collectAsState()
+    var showDownloadDialog by remember { mutableStateOf(false) }
+    var selectedDownloadChapterIds by remember { mutableStateOf<Set<Int>>(emptySet()) }
 
     LaunchedEffect(Unit) {
         if (comicDetailState.data != null) {
             return@LaunchedEffect
         }
         comicDetailViewModel.getComicDetail(id)
+        comicDetailViewModel.loadReadingProgress(id)
     }
 
     if (comicDetailState.isLoading && comicDetailState.data == null) {
@@ -322,7 +340,12 @@ fun ComicDetailScreen(
                         }
                         IconButton(
                             onClick = {
-                                downloadManager.downloadComic(comic)
+                                if (comic.comicChapterList.isEmpty()) {
+                                    downloadManager.downloadComic(comic)
+                                } else {
+                                    selectedDownloadChapterIds = comic.comicChapterList.map { it.id }.toSet()
+                                    showDownloadDialog = true
+                                }
                             },
                         ) {
                             Icon(
@@ -332,7 +355,29 @@ fun ComicDetailScreen(
                         }
                     }
                     Spacer(modifier = Modifier.weight(1f))
-                    if (comic.comicChapterList.isEmpty()) {
+
+                    // Show "Continue Reading" if progress exists, otherwise show "Start Reading" or chapter buttons
+                    val progress = readingProgress
+                    if (progress != null && progress.pageIndex > 0) {
+                        // Has reading progress: show "Continue Reading"
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = "上次读到 ${progress.chapterName} 第${progress.pageIndex + 1}/${progress.totalPages}页",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Button(onClick = {
+                                val route = if (progress.isLocal) {
+                                    "localComicRead/${progress.chapterId}"
+                                } else {
+                                    "comicRead/${progress.chapterId}"
+                                }
+                                mainNavController.navigate(route)
+                            }) {
+                                Text("继续阅读")
+                            }
+                        }
+                    } else if (comic.comicChapterList.isEmpty()) {
                         Button(onClick = {
                             mainNavController.navigate("comicRead/${comic.id}")
                         }) {
@@ -358,7 +403,8 @@ fun ComicDetailScreen(
                             Button(
                                 contentPadding = PaddingValues(horizontal = 16.dp),
                                 onClick = {
-                                    mainNavController.navigate("comicRead/${comic.id}")
+                                    val firstChapterId = comic.comicChapterList.firstOrNull()?.id ?: comic.id
+                                    mainNavController.navigate("comicRead/$firstChapterId")
                                 },
                                 shape = RoundedCornerShape(
                                     topStart = 0.dp,
@@ -502,6 +548,142 @@ fun ComicDetailScreen(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "退出详情"
                         )
+                    }
+                }
+            }
+        }
+    }
+    val currentComic = comicDetailState.data
+    if (showDownloadDialog && currentComic != null) {
+        DownloadChapterPickerDialog(
+            chapters = currentComic.comicChapterList,
+            selectedChapterIds = selectedDownloadChapterIds,
+            onSelectedChange = { selectedDownloadChapterIds = it },
+            onDismiss = { showDownloadDialog = false },
+            onDownload = {
+                val selectedChapters = currentComic.comicChapterList.filter { chapter ->
+                    chapter.id in selectedDownloadChapterIds
+                }
+                downloadManager.downloadComicChapters(currentComic, selectedChapters)
+                showDownloadDialog = false
+            }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun DownloadChapterPickerDialog(
+    chapters: List<ComicChapter>,
+    selectedChapterIds: Set<Int>,
+    onSelectedChange: (Set<Int>) -> Unit,
+    onDismiss: () -> Unit,
+    onDownload: () -> Unit,
+) {
+    val allIds = chapters.map { it.id }.toSet()
+    val firstPageIds = chapters.take(20).map { it.id }.toSet()
+    val lastPageIds = chapters.takeLast(20).map { it.id }.toSet()
+
+    BasicAlertDialog(onDismissRequest = onDismiss) {
+        Card(
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ),
+            shape = MaterialTheme.shapes.extraLarge,
+        ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "选择下载章节 (${selectedChapterIds.size}/${chapters.size})",
+                    fontSize = 18.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                )
+                HorizontalDivider()
+                FlowRow(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    TextButton(onClick = { onSelectedChange(allIds) }) {
+                        Text("全选")
+                    }
+                    TextButton(onClick = { onSelectedChange(emptySet()) }) {
+                        Text("清空")
+                    }
+                    if (chapters.size > 20) {
+                        TextButton(onClick = { onSelectedChange(firstPageIds) }) {
+                            Text("前20话")
+                        }
+                        TextButton(onClick = { onSelectedChange(lastPageIds) }) {
+                            Text("后20话")
+                        }
+                    }
+                }
+                HorizontalDivider()
+                LazyColumn(modifier = Modifier.heightIn(max = 420.dp)) {
+                    itemsIndexed(chapters, key = { _, chapter -> chapter.id }) { index, chapter ->
+                        val checked = chapter.id in selectedChapterIds
+                        Row(
+                            modifier = Modifier
+                                .clickable {
+                                    onSelectedChange(
+                                        if (checked) {
+                                            selectedChapterIds - chapter.id
+                                        } else {
+                                            selectedChapterIds + chapter.id
+                                        }
+                                    )
+                                }
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = checked,
+                                onCheckedChange = { isChecked ->
+                                    onSelectedChange(
+                                        if (isChecked) {
+                                            selectedChapterIds + chapter.id
+                                        } else {
+                                            selectedChapterIds - chapter.id
+                                        }
+                                    )
+                                }
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(text = "第${index + 1}话", fontWeight = FontWeight.Bold)
+                                if (chapter.name.isNotBlank()) {
+                                    Text(
+                                        text = chapter.name,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 14.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                HorizontalDivider()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Spacer(modifier = Modifier.weight(1f))
+                    TextButton(onClick = onDismiss) {
+                        Text("取消")
+                    }
+                    Button(
+                        enabled = selectedChapterIds.isNotEmpty(),
+                        onClick = onDownload
+                    ) {
+                        Text("下载")
                     }
                 }
             }

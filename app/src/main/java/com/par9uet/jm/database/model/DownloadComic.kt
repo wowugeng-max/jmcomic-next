@@ -14,4 +14,9 @@ data class DownloadComic(
     val progress: Float,
     val status: String, // pending || downloading || complete
     val createTime: Long,
+    val parentId: Int = id,
+    val parentName: String = name,
+    val chapterIndex: Int = 0,
+    val chapterName: String = "",
+    val chapterCount: Int = 1,
 )

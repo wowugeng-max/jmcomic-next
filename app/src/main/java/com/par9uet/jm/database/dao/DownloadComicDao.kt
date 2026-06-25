@@ -28,6 +28,9 @@ interface DownloadComicDao {
     @Query("SELECT * FROM download_comics WHERE status IN ('pending', 'downloading', 'paused') ORDER BY createTime DESC")
     fun getActiveList(): PagingSource<Int, DownloadComic>
 
+    @Query("SELECT * FROM download_comics ORDER BY createTime DESC")
+    fun observeAllList(): Flow<List<DownloadComic>>
+
     @Query("SELECT * FROM download_comics WHERE status = 'complete' ORDER BY createTime DESC")
     fun observeCompleteList(): Flow<List<DownloadComic>>
 
@@ -39,6 +42,9 @@ interface DownloadComicDao {
 
     @Query("SELECT * FROM download_comics WHERE id = :comicId LIMIT 1")
     suspend fun getById(comicId: Int): DownloadComic?
+
+    @Query("SELECT * FROM download_comics WHERE parentId = :parentId OR (id = :parentId AND parentId = 0) ORDER BY chapterIndex ASC, createTime ASC")
+    suspend fun getChaptersByParent(parentId: Int): List<DownloadComic>
 
     @Query("SELECT EXISTS(SELECT 1 FROM download_comics WHERE id = :comicId)")
     fun isExist(comicId: Int): Flow<Boolean>

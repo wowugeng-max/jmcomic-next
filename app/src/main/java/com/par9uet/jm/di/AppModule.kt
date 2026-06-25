@@ -12,6 +12,7 @@ import com.par9uet.jm.storage.HistorySearchStorage
 import com.par9uet.jm.storage.LocalSettingStorage
 import com.par9uet.jm.storage.SecureStorage
 import com.par9uet.jm.storage.UserStorage
+import com.par9uet.jm.store.DownloadToastAggregator
 import com.par9uet.jm.store.HistorySearchManager
 import com.par9uet.jm.store.InitManager
 import com.par9uet.jm.store.LocalSettingManager
@@ -52,6 +53,7 @@ val appModule = module {
     single { LocalSettingManager(get()) } bind AppInitTask::class
     single { HistorySearchManager(get()) } bind AppInitTask::class
     single { ToastManager() }
+    single { DownloadToastAggregator(get()) }
     single { InitManager() }
 
     single<Gson> { GsonBuilder().setStrictness(Strictness.LENIENT).serializeNulls().create() }
